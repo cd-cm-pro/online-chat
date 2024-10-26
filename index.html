@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modern Chat App</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            background-color: #f0f2f5;
+        }
+
+        #app {
+            display: flex;
+            width: 100%;
+            max-width: 1200px;
+            margin: auto;
+            background-color: white;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        #sidebar {
+            width: 300px;
+            background-color: #f0f2f5;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        #main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #chat {
+            overflow-y: auto;
+            padding: 20px;
+            height: 370px;
+        }
+
+        #messages {
+            list-style-type: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        #messages li {
+            padding: 10px;
+            background: #e9e9e9;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        #message-form {
+            display: flex;
+            padding: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"],
+        button {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"] {
+            flex: 1;
+        }
+
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        #room-list {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        #room-list li {
+            padding: 10px;
+            background: #fff;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        #room-list li:hover {
+            background: #e9e9e9;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .admin-controls {
+                position: absolute;
+                left: 0;
+                bottom: 0;
+                padding: 10px;
+                background: #f0f0f0;
+        }
+
+        .user-list {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        .user-list li {
+            padding: 5px;
+            cursor: pointer;
+        }
+
+        .user-list li:hover {
+            background: #e0e0e0;
+        }
+
+        .admin {
+            font-weight: bold;
+            color: #4CAF50;
+        }
+
+        .kick-button {
+            background-color: #ff4d4d;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            margin-left: 10px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        .kick-button:hover {
+            background-color: #ff3333;
+        }
+
+        .msg_me {
+            text-decoration: dotted underline;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <div id="sidebar">
+            <div id="nickname-input">
+                <input type="text" id="nickname" placeholder="닉네임을 입력하세요..." />
+                <button onclick="setNickname()">닉네임 설정</button>
+            </div>
+            <div id="room-controls" class="hidden">
+                <input type="text" id="room-name" placeholder="방 이름 입력" />
+                <input type="password" id="room-password" placeholder="비밀번호 (선택사항)" />
+                <input type="number" id="room-max-users" placeholder="최대 인원 (선택사항)" />
+                <button onclick="createRoom()">방 만들기</button>
+                <h3>방:</h3>
+                <ul id="room-list"></ul>
+            </div>
+        </div>
+        <div id="main">
+            <div id="chat" class="hidden">
+                <ul id="messages"></ul>
+            </div>
+            <div id="admin-controls" class="hidden admin-controls">
+                <h4>사용자 목록:</h4>
+                <ul id="user-list" class="user-list"></ul>
+            </div>
+            <form id="message-form" class="hidden">
+                <input id="m" autocomplete="off" /><button>보내기</button>
+            </form>
+        </div>
+    </div>
+    <script>
+        const socket = io();
+        let currentRoom = '';
+        let nickname = '';
+        let isAdmin = false;
+
+        function setNickname() {
+            nickname = $('#nickname').val().trim();
+            if (nickname) {
+                $('#nickname-input').addClass('hidden');
+                $('#room-controls').removeClass('hidden');
+                socket.emit('set nickname', nickname);
+            }
+        }
+
+        function createRoom() {
+            const roomName = $('#room-name').val().trim();
+            const password = $('#room-password').val();
+            const maxUsers = $('#room-max-users').val() ? parseInt($('#room-max-users').val()) : null;
+            if (roomName) {
+                socket.emit('create room', { roomName, password, maxUsers });
+            }
+        }
+
+        function joinRoom(roomName) {
+            const password = prompt("비밀번호를 입력하세요 (없으면 빈칸으로 두세요):");
+            socket.emit('join room', { roomName, password });
+        }
+
+        function kickUser(userId) {
+            if (isAdmin && confirm("이 사용자를 강퇴하시겠습니까?")) {
+                socket.emit('kick user', { roomName: currentRoom, userId });
+            }
+        }
+
+        function scrollToBottom() {
+            const chatContainer = document.getElementById('chat');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        socket.on('update rooms', (rooms) => {
+            const roomList = $('#room-list');
+            roomList.empty();
+            rooms.forEach(room => {
+                const roomElement = $('<li>')
+                    .text(`${room.name} (${room.currentUsers}/${room.maxUsers === null ? '∞' : room.maxUsers})`)
+                    .click(() => joinRoom(room.name));
+                if (room.hasPassword) {
+                    roomElement.append(' 🔒');
+                }
+                roomList.append(roomElement);
+            });
+        });
+
+        socket.on('room joined', (data) => {
+            currentRoom = data.roomName;
+            isAdmin = data.isAdmin;
+            $('#chat').removeClass('hidden');
+            $('#message-form').removeClass('hidden');
+            $('#messages').append($('<li>').text(`방 접속됨: ${data.roomName}`));
+            updateUserList();
+            updateAdminControls();
+            scrollToBottom();
+        });
+
+        socket.on('chat message', function (data) {
+            const messageElement = $('<li>')
+                .text(`${data.nickname}: ${data.msg} / ${new Date().getHours()}:${new Date().getMinutes() < 10 ? "0" + new Date().getMinutes() : new Date().getMinutes()}`);
+            
+            if (data.nickname == nickname) {
+                messageElement.addClass('msg_me');
+            } else {
+                messageElement.addClass('msg_other');
+            }
+            if (data.isAdmin) {
+                messageElement.addClass('admin');
+            }
+            $('#messages').append(messageElement);
+            scrollToBottom();
+        });
+
+        socket.on('user joined', (nickname) => {
+            $('#messages').append($('<li>').text(`${nickname}님이 입장하셨습니다.`));
+            updateUserList();
+            scrollToBottom();
+        });
+
+        socket.on('user left', (nickname) => {
+            $('#messages').append($('<li>').text(`${nickname}님이 퇴장하셨습니다.`));
+            updateUserList();
+            scrollToBottom();
+        });
+
+        socket.on('new admin', (nickname) => {
+            $('#messages').append($('<li>').text(`${nickname}님이 새로운 관리자가 되었습니다.`));
+            updateUserList();
+            scrollToBottom();
+        });
+
+        socket.on('kicked', (roomName) => {
+            alert(`${roomName} 방에서 강퇴되었습니다.`);
+            currentRoom = '';
+            isAdmin = false;
+            $('#chat').addClass('hidden');
+            $('#message-form').addClass('hidden');
+            $('#admin-controls').addClass('hidden');
+        });
+
+        socket.on('wrong password', () => {
+            alert('비밀번호가 틀렸습니다.');
+        });
+
+        socket.on('room full', () => {
+            alert('방이 꽉 찼습니다.');
+        });
+
+        socket.on('user list', (users) => {
+            const userList = $('#user-list');
+            userList.empty();
+            users.forEach(user => {
+                const userElement = $('<li>').text(user.nickname + (user.isAdmin ? ' (관리자)' : ''));
+                if (user.isAdmin) {
+                    userElement.addClass('admin');
+                }
+                if (isAdmin && !user.isAdmin) {
+                    const kickButton = $('<button>')
+                        .text('강퇴')
+                        .addClass('kick-button')
+                        .click((e) => {
+                            e.stopPropagation();
+                            kickUser(user.id);
+                        });
+                    userElement.append(kickButton);
+                }
+                userList.append(userElement);
+            });
+
+            updateAdminControls();
+        });
+
+        $('#message-form').submit(function (e) {
+            e.preventDefault();
+            const msg = $('#m').val();
+            if (msg.trim() && currentRoom) {
+                socket.emit('chat message', { room: currentRoom, msg: msg });
+                $('#m').val('');
+                scrollToBottom();
+            }
+            return false;
+        });
+
+        function updateUserList() {
+            if (currentRoom) {
+                socket.emit('get users', currentRoom);
+            }
+        }
+
+        function updateAdminControls() {
+            if (isAdmin) {
+                $('#admin-controls').removeClass('hidden');
+            } else {
+                $('#admin-controls').addClass('hidden');
+            }
+        }
+
+        // 주기적으로 사용자 목록 업데이트
+        setInterval(updateUserList, 1000);
+    </script>
+</body>
+
+</html>
